@@ -9,7 +9,9 @@
 		<ProduceReferenceAssembly>false</ProduceReferenceAssembly>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<LangVersion>latestmajor</LangVersion>
-		<Version>1.7.3.0</Version>
+		<Version>1.7.4.0</Version>
+		<!-- Dalamud refuses custom-repo plugins whose InternalName (= assembly name) matches an official one. -->
+		<AssemblyName>BrowsingwayEvolved</AssemblyName>
 		<OutputPath>..\out</OutputPath>
 		<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
 	</PropertyGroup>
@@ -31,7 +33,7 @@
 	</ItemGroup>
 	
 	<ItemGroup>
-		<Content Include="Browsingway.json">
+		<Content Include="BrowsingwayEvolved.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
 		<Content Include="images\icon.png">

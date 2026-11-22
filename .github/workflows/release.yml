@@ -1,7 +1,7 @@
 name: Release
 
 # Builds the plugin and publishes a GitHub release v<Version> (from Browsingway/Browsingway.csproj)
-# with Browsingway.zip attached. EvolvedXIV/releases' repo.json points at that asset.
+# with BrowsingwayEvolved.zip attached. EvolvedXIV/releases' repo.json points at that asset.
 on:
   workflow_dispatch:
 
@@ -36,9 +36,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(sed -n 's#.*<Version>\(.*\)</Version>.*#\1#p' Browsingway/Browsingway.csproj)
-          cp out/Browsingway/latest.zip Browsingway.zip
-          notes=$(python3 -c "import json; print(json.load(open('out/Browsingway/Browsingway.json', encoding='utf-8-sig'))['Changelog'])")
-          gh release create "v$version" Browsingway.zip \
-            --title "Browsingway v$version" \
+          cp out/BrowsingwayEvolved/latest.zip BrowsingwayEvolved.zip
+          notes=$(python3 -c "import json; print(json.load(open('out/BrowsingwayEvolved/BrowsingwayEvolved.json', encoding='utf-8-sig'))['Changelog'])")
+          gh release create "v$version" BrowsingwayEvolved.zip \
+            --title "Browsingway Evolved v$version" \
             --notes "$notes" \
             --target "$GITHUB_SHA"
