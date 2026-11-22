@@ -36,8 +36,14 @@ internal class RenderProcess : IDisposable
 		IPluginLog pluginLog
 	)
 	{
-		_keepAliveHandleName = $"BrowsingwayRendererKeepAlive{pid}";
-		_ipcChannelName = $"BrowsingwayRendererIpcChannel{pid}";
+		// The names must be unique per RenderProcess, not just per game process. With the PID alone, a reloaded
+		// plugin reuses the names of the previous instance while that instance's RpcBuffer (whose Dispose is
+		// deferred to its read thread) or renderer may still hold them, and SharedMemory picks master/slave by
+		// whoever owns the named mutex. The renderer can then join a half torn down channel and die with a
+		// FileNotFoundException from MemoryMappedFile.OpenExisting.
+		string instanceId = Guid.NewGuid().ToString("N");
+		_keepAliveHandleName = $"BrowsingwayRendererKeepAlive{pid}_{instanceId}";
+		_ipcChannelName = $"BrowsingwayRendererIpcChannel{pid}_{instanceId}";
 		_dependencyManager = dependencyManager;
 		_pluginDir = pluginDir;
 		_configDir = configDir;

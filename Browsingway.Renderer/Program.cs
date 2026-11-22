@@ -36,6 +36,14 @@ internal static class Program
 
 		AppDomain.CurrentDomain.AssemblyResolve += CustomAssemblyResolver;
 
+		// An unhandled exception must end the process. Under Wine it otherwise opens the crash dialog, which keeps
+		// the process alive, so the plugin never sees it exit and never restarts it.
+		AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+		{
+			Console.Error.WriteLine($"FATAL: Unhandled exception in render process: {e.ExceptionObject}");
+			Environment.Exit(1);
+		};
+
 		Run(args);
 	}
 
@@ -54,7 +62,11 @@ internal static class Program
 		bool dxRunning = DxHandler.Initialise(new LUID {LowPart = args.DxgiAdapterLuidLow, HighPart = args.DxgiAdapterLuidHigh});
 		CefHandler.Initialise(_cefAssemblyDir, args.CefCacheDir, args.ParentPid);
 
-		InitializeIpc(args.IpcChannelName);
+		if (!TryInitializeIpc(args.IpcChannelName))
+		{
+			Console.Error.WriteLine("FATAL: Could not connect to the plugin's IPC channel. Exiting so the plugin can restart the render process.");
+			Environment.Exit(2);
+		}
 
 		Console.WriteLine("Notifying on ready state.");
 
@@ -72,6 +84,31 @@ internal static class Program
 
 		DxHandler.Shutdown();
 		CefHandler.Shutdown();
+	}
+
+	private static bool TryInitializeIpc(string channelName)
+	{
+		// The plugin creates the channel before it starts this process, so a missing channel is unexpected.
+		// Retry briefly instead of crashing, in case its shared memory is not there yet.
+		DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		while (true)
+		{
+			try
+			{
+				InitializeIpc(channelName);
+				return true;
+			}
+			catch (FileNotFoundException e) when (DateTime.UtcNow < deadline)
+			{
+				Console.Error.WriteLine($"IPC channel {channelName} not available yet, retrying: {e.Message}");
+				Thread.Sleep(250);
+			}
+			catch (Exception e)
+			{
+				Console.Error.WriteLine($"FATAL: Could not open IPC channel {channelName}: {e}");
+				return false;
+			}
+		}
 	}
 
 	// TODO: move RPC stuff away
