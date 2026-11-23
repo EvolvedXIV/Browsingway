@@ -15,5 +15,5 @@
         "website",
         "video"
     ],
-    "Changelog": "- Renamed to Browsingway Evolved (internal name BrowsingwayEvolved) so it can be installed from the EvolvedXIV repository\n- Fix the render process randomly failing to start (FileNotFoundException when opening its IPC channel), which needed a game restart to recover\n- Api 15\n"
+    "Changelog": "- Overlays recover after the render process restarts, instead of staying on the error screen until the plugin is toggled\n- Renamed to Browsingway Evolved (internal name BrowsingwayEvolved) so it can be installed from the EvolvedXIV repository\n- Fix the render process randomly failing to start (FileNotFoundException when opening its IPC channel), which needed a game restart to recover\n- Api 15\n"
 }

@@ -10,12 +10,25 @@ internal class RenderProcess : IDisposable
 	public event EventHandler? Crashed;
 	public BrowsingwayRpc? Rpc { get; private set; }
 
+	// Forwarded from the current Rpc, which is replaced whenever the render process is restarted.
+	public event Action<RendererReadyMessage>? RendererReady;
+	public event Action<SetCursorMessage>? SetCursor;
+	public event Action<UpdateTextureMessage>? UpdateTexture;
+
+	/// <summary>
+	/// True once the current render process has connected and reported ready. Anything sent to it before
+	/// then can be lost, and nothing would send it again.
+	/// </summary>
+	public bool IsReady => _isReady;
+
+	private volatile bool _isReady;
+
 	private readonly string _configDir;
 	private readonly DependencyManager _dependencyManager;
 
-	private readonly string _ipcChannelName;
+	private string _ipcChannelName = null!;
 
-	private readonly string _keepAliveHandleName;
+	private string _keepAliveHandleName = null!;
 	private readonly int _parentPid;
 	private readonly string _pluginDir;
 
@@ -36,22 +49,41 @@ internal class RenderProcess : IDisposable
 		IPluginLog pluginLog
 	)
 	{
-		// The names must be unique per RenderProcess, not just per game process. With the PID alone, a reloaded
-		// plugin reuses the names of the previous instance while that instance's RpcBuffer (whose Dispose is
-		// deferred to its read thread) or renderer may still hold them, and SharedMemory picks master/slave by
-		// whoever owns the named mutex. The renderer can then join a half torn down channel and die with a
-		// FileNotFoundException from MemoryMappedFile.OpenExisting.
-		string instanceId = Guid.NewGuid().ToString("N");
-		_keepAliveHandleName = $"BrowsingwayRendererKeepAlive{pid}_{instanceId}";
-		_ipcChannelName = $"BrowsingwayRendererIpcChannel{pid}_{instanceId}";
 		_dependencyManager = dependencyManager;
 		_pluginDir = pluginDir;
 		_configDir = configDir;
 		_parentPid = pid;
 
-		Rpc = new BrowsingwayRpc(_ipcChannelName);
+		CreateChannel();
 
 		_process = SetupProcess();
+	}
+
+	private void CreateChannel()
+	{
+		// The names must be unique per render process, not just per game process. With the PID alone, a reloaded
+		// plugin reuses the names of the previous instance while that instance's RpcBuffer (whose Dispose is
+		// deferred to its read thread) or renderer may still hold them, and SharedMemory picks master/slave by
+		// whoever owns the named mutex. The renderer can then join a half torn down channel and die with a
+		// FileNotFoundException from MemoryMappedFile.OpenExisting. A restarted renderer gets a new channel too:
+		// the old one may still hold messages meant for the dead process.
+		string instanceId = Guid.NewGuid().ToString("N");
+		_keepAliveHandleName = $"BrowsingwayRendererKeepAlive{_parentPid}_{instanceId}";
+		_ipcChannelName = $"BrowsingwayRendererIpcChannel{_parentPid}_{instanceId}";
+
+		BrowsingwayRpc rpc = new(_ipcChannelName);
+		rpc.RendererReady += msg =>
+		{
+			if (msg.HasDxSharedTexturesSupport)
+			{
+				_isReady = true;
+			}
+
+			RendererReady?.Invoke(msg);
+		};
+		rpc.SetCursor += msg => SetCursor?.Invoke(msg);
+		rpc.UpdateTexture += msg => UpdateTexture?.Invoke(msg);
+		Rpc = rpc;
 	}
 
 	public void Dispose()
@@ -107,6 +139,7 @@ internal class RenderProcess : IDisposable
 		if (_restartCount >= _maxRestarts)
 		{
 			Services.PluginLog.Error("Render process is crashing in a loop - please check the logs. No further restarts will be attempted until Browsingway is restarted.");
+			_isReady = false;
 			Stop();
 			Rpc?.Dispose();
 			Rpc = null;
@@ -122,7 +155,15 @@ internal class RenderProcess : IDisposable
 				{
 					// process crashed, restart
 					_restartCount++;
-					Services.PluginLog.Error($"Render process crashed - will restart asap (attempt {_restartCount}/{_maxRestarts}).");
+					string exitCode;
+					try { exitCode = $"{_process.ExitCode} (0x{_process.ExitCode:X8})"; }
+					catch (Exception) { exitCode = "unknown"; }
+
+					Services.PluginLog.Error($"Render process exited with code {exitCode} - will restart asap (attempt {_restartCount}/{_maxRestarts}).");
+
+					_isReady = false;
+					Rpc?.Dispose();
+					CreateChannel();
 					_process = SetupProcess();
 					_process.Start();
 					_process.BeginOutputReadLine();

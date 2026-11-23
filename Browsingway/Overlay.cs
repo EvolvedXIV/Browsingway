@@ -18,6 +18,8 @@ internal class Overlay : IDisposable
 	private bool _mouseInWindow;
 
 	private bool _resizing;
+	private DateTime _resizeRequestedAt;
+	private static readonly TimeSpan _textureTimeout = TimeSpan.FromSeconds(10);
 	private Vector2 _size;
 	private bool _hasRenderError = false;
 	private SharedTextureHandler? _textureHandler;
@@ -33,6 +35,7 @@ internal class Overlay : IDisposable
 		_renderProcess.Crashed += (_, _) =>
 		{
 			_size = Vector2.Zero;
+			_resizing = false; // a request in flight died with the process; the new one must get a fresh one
 			_hasRenderError = true;
 		};
 
@@ -169,6 +172,10 @@ internal class Overlay : IDisposable
 					ImGuiHelpers.CenteredText("An error occured while building the browser overlay texture:");
 					ImGuiHelpers.CenteredText(_textureRenderException.ToString());
 				}
+				else if (_renderProcess.Rpc is not null && (!_renderProcess.IsReady || _resizing))
+				{
+					ImGuiHelpers.CenteredText("Waiting for the browser to start...");
+				}
 				else
 				{
 					ImGuiHelpers.CenteredText("An error occured while building the browser overlay texture. Check the log for more details.");
@@ -223,8 +230,15 @@ internal class Overlay : IDisposable
 		try
 		{
 			_textureHandler = new SharedTextureHandler(handle);
+			_textureRenderException = null;
 		}
-		catch (Exception e) { _textureRenderException = e; }
+		catch (Exception e)
+		{
+			// The old handler is disposed below, so it must not stay in use.
+			_textureHandler = null;
+			_textureRenderException = e;
+			Services.PluginLog.Error(e, $"Overlay {_overlayConfig.Name}: could not open the texture from the render process.");
+		}
 
 		if (oldTextureHandler != null) { oldTextureHandler.Dispose(); }
 	}
@@ -305,8 +319,20 @@ internal class Overlay : IDisposable
 
 	private void HandleWindowSize()
 	{
+		// The renderer answers every NewOverlay/ResizeOverlay with UpdateTexture. If no answer comes (the message
+		// was lost, or the renderer could not build the browser), create the browser again instead of waiting forever.
+		if (_resizing && DateTime.UtcNow - _resizeRequestedAt > _textureTimeout)
+		{
+			Services.PluginLog.Warning($"Overlay {_overlayConfig.Name}: no texture from the render process after {_textureTimeout.TotalSeconds}s, creating its browser again.");
+			_resizing = false;
+			_size = Vector2.Zero;
+		}
+
 		Vector2 currentSize = ImGui.GetWindowContentRegionMax() - ImGui.GetWindowContentRegionMin();
 		if (currentSize == _size || _resizing) { return; }
+
+		// Wait until the render process is connected: a request sent before then can be lost, and would not be sent again.
+		if (!_renderProcess.IsReady) { return; }
 
 		if (_size == Vector2.Zero)
 		{
@@ -329,6 +355,7 @@ internal class Overlay : IDisposable
 		}
 
 		_resizing = true;
+		_resizeRequestedAt = DateTime.UtcNow;
 		_size = currentSize;
 	}
 
